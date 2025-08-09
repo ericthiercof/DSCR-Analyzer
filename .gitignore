@@ -1,5 +1,41 @@
+# Environment variables and secrets
+.env
+backend/.env
 .streamlit/secrets.toml
 firebase_key.json
+backend/firebase_key.json
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (for future React frontend)
+node_modules/
+npm-debug.log*
+
+# Build files
+dist/
+build/
+
+# Logs
+*.log
+logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
