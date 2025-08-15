@@ -6,7 +6,7 @@
     "codespaces": {
       "openFiles": [
         "README.md",
-        "streamlit_app.py"
+        "main.py" // Changed to main.py for FastAPI
       ]
     },
     "vscode": {
@@ -17,17 +17,27 @@
       ]
     }
   },
-  "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; [ -f requirements.txt ] && pip3 install --user -r requirements.txt; pip3 install --user streamlit; echo '✅ Packages installed and Requirements met'",
+  "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; [ -f requirements.txt ] && pip3 install --user -r requirements.txt; pip3 install --user fastapi uvicorn; echo '✅ Packages installed and Requirements met'",
   "postAttachCommand": {
-    "server": "streamlit run streamlit_app.py --server.enableCORS false --server.enableXsrfProtection false"
+    "server": "echo 'To start FastAPI: uvicorn main:app --host 0.0.0.0 --port 8000 --reload'"
   },
   "portsAttributes": {
     "8501": {
-      "label": "Application",
+      "label": "Streamlit",
+      "onAutoForward": "openPreview"
+    },
+    "8000": {
+      "label": "FastAPI",
+      "onAutoForward": "openPreview"
+    },
+    "3000": {
+      "label": "React Frontend",
       "onAutoForward": "openPreview"
     }
   },
   "forwardPorts": [
-    8501
+    8501,
+    8000,
+    3000
   ]
 }

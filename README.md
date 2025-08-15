@@ -3,6 +3,8 @@
 A professional real estate investment analysis platform for mortgage brokers and realtors.
 
 ## 🚀 Features
+- **Rental Comps** - Find comparable rental properties with Mashvisor API
+
 
 - **Property Search** - Find investment properties using Zillow API
 - **DSCR Analysis** - Calculate Debt Service Coverage Ratio for each property
@@ -66,6 +68,11 @@ python3 main.py
 ```
 
 ## 🔑 API Keys Required
+### Mashvisor API
+1. Sign up at [Mashvisor](https://www.mashvisor.com/)
+2. Get your API key
+3. Add to `backend/.env` as MASHVISOR_API_KEY=your_key_here
+
 
 ### Zillow API (RapidAPI)
 1. Sign up at [RapidAPI](https://rapidapi.com/)
@@ -83,6 +90,24 @@ python3 main.py
 3. Place in `/backend/` directory
 
 ## 📊 API Endpoints
+### Property Rental Comps
+```bash
+POST /api/property-comps
+```
+Get rental comps for specific properties
+
+**Example Request:**
+```json
+{
+  "address": "123 Main St",
+  "city": "Miami",
+  "state": "FL",
+  "zip": "33142",
+  "bedrooms": 3,
+  "bathrooms": 2
+}
+```
+
 
 ### Property Search
 ```bash

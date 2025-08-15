@@ -1,0 +1,742 @@
+import re 
+import requests
+import os
+from typing import List, Dict
+
+class MashvisorPropertySearch:
+    def __init__(self):
+        self.api_key = os.getenv('MASHVISOR_API_KEY')
+        print(f"🔑 Loaded Mashvisor API Key: {self.api_key}")  # Debug print
+        if not self.api_key:
+            raise ValueError("Mashvisor API key not found. Please check your .env file.")
+        
+        # Set base URL and headers
+        self.base_url = "https://api.mashvisor.com/v1.1"
+        self.headers = {
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json"
+        }
+    
+    def search_investment_properties(self, city: str, state: str, min_price: int = 0, max_price: int = 0, limit: int = 20) -> List[Dict]:
+        """Search for investment properties using Mashvisor API"""
+        
+        # Try different endpoint patterns based on common API structures
+        endpoints = [
+            f"{self.base_url}/client/properties",
+            f"{self.base_url}/properties",
+            f"{self.base_url}/property/list"
+        ]
+        
+        params = {
+            'state': state,
+            'city': city,
+            'limit': limit
+        }
+        
+        # Add optional parameters if provided
+        if min_price > 0:
+            params['min_price'] = min_price
+        if max_price > 0:
+            params['max_price'] = max_price
+        
+        # Try each endpoint until one works
+        for endpoint in endpoints:
+            try:
+                print(f"🔍 Searching Mashvisor at {endpoint} for properties in {city}, {state}")
+                response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
+                
+                print(f"📡 Request URL: {response.url}")
+                print(f"📊 Response status: {response.status_code}")
+                
+                if response.status_code == 404:
+                    print(f"❌ Endpoint not found: {endpoint}")
+                    continue  # Try the next endpoint
+                
+                if response.status_code == 401:
+                    print("❌ Authentication failed - check your Mashvisor API key")
+                    return []
+                
+                response.raise_for_status()
+                
+                data = response.json()
+                print(f"📄 Response keys: {list(data.keys())}")
+                
+                # Different APIs might have different response structures
+                properties = []
+                
+                if data.get('status') == 'success':
+                    # Try different property extraction patterns
+                    if 'properties' in data:
+                        properties = data['properties']
+                    elif 'content' in data and 'properties' in data['content']:
+                        properties = data['content']['properties']
+                    elif 'data' in data:
+                        properties = data['data']
+                    elif 'results' in data:
+                        properties = data['results']
+                    
+                    print(f"✅ Found {len(properties)} investment properties from Mashvisor")
+                    
+                    # Format properties for the application
+                    formatted_properties = []
+                    for prop in properties:
+                        # Create a more flexible property extraction
+                        address = prop.get('address', {})
+                        if isinstance(address, dict):
+                            full_address = address.get('full', 'Address not available')
+                        else:
+                            full_address = str(address)
+                            
+                        rental_income = prop.get('rental_income', {})
+                        if isinstance(rental_income, dict):
+                            est_rent = rental_income.get('long_term', 0)
+                        else:
+                            est_rent = rental_income if rental_income else 0
+                            
+                        formatted_properties.append({
+                            'address': full_address,
+                            'price': prop.get('price', 0),
+                            'bedrooms': prop.get('bedrooms', 0),
+                            'bathrooms': prop.get('bathrooms', 0),
+                            'square_feet': prop.get('square_feet', 0),
+                            'estimated_rent': est_rent,
+                            'mashvisor_id': prop.get('id', '')
+                        })
+                    
+                    return formatted_properties
+                else:
+                    print(f"❌ Mashvisor search failed: {data.get('message', 'Unknown error')}")
+                    continue  # Try the next endpoint
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Mashvisor API error for endpoint {endpoint}: {e}")
+                continue  # Try the next endpoint
+        
+        # If we've tried all endpoints and none worked
+        print("❌ All Mashvisor API endpoints returned errors")
+        return []
+
+    def search_long_term_rental_comps(self, city: str, state: str, zipcode: str = None, 
+                               min_price: int = 0, max_price: int = 0, 
+                               min_beds: int = 0, max_beds: int = 0, 
+                               min_baths: int = 0, max_baths: int = 0, 
+                               limit: int = 30) -> List[Dict]:
+        """
+        Search for long-term rental comps in a specific area.
+        Enhanced with better debugging and fallback parameters.
+        """
+        endpoint = f"{self.base_url}/client/long-term-comps"
+        
+        # Build parameters, adding sensible defaults and widening search
+        params = {
+            'state': state,
+            'page': 1,
+            'limit': limit,
+            'radius': 15  # Increased radius from 5 to 15 miles for more results
+        }
+        
+        if city:
+            print(f"🏙️ Adding city parameter: {city}")
+            params['city'] = city
+            
+        if zipcode:
+            print(f"📮 Adding ZIP code parameter: {zipcode}")
+            params['zip_code'] = zipcode
+        
+        # Add price range if provided - with a wider range to find more comps
+        if min_price > 0:
+            # Widen the price range by 30%
+            params['min_price'] = int(min_price * 0.7)  # Lower the minimum by 30%
+        if max_price > 0:
+            params['max_price'] = int(max_price * 1.3)  # Increase the maximum by 30%
+            
+        # Add bed/bath filters if provided, but make them more flexible
+        if min_beds > 0:
+            params['min_beds'] = max(1, min_beds - 1)  # Lower minimum
+        if max_beds > 0:
+            params['max_beds'] = max_beds + 2  # Higher maximum
+        if min_baths > 0:
+            params['min_baths'] = max(1, min_baths - 1)  # Lower minimum
+        if max_baths > 0:
+            params['max_baths'] = max_baths + 2  # Higher maximum
+        
+        print(f"🔍 Searching Mashvisor for long-term rental comps in {city}, {state} {zipcode}")
+        print(f"🔍 Price range: ${params.get('min_price', 'any')} - ${params.get('max_price', 'any')}")
+        print(f"🔍 Beds/Baths: {params.get('min_beds', 'any')}-{params.get('max_beds', 'any')} beds, {params.get('min_baths', 'any')}-{params.get('max_baths', 'any')} baths")
+        
+        # Try the initial search
+        try:
+            print(f"🔑 Using API key: {self.api_key[:4]}...{self.api_key[-4:]}")
+            
+            # Increase timeout to 60 seconds
+            response = requests.get(
+                endpoint, 
+                headers=self.headers, 
+                params=params, 
+                timeout=60  # Increased timeout
+            )
+            
+            print(f"📡 Request URL: {response.url}")
+            print(f"📊 Response status: {response.status_code}")
+            
+            if response.status_code == 401:
+                print("❌ Authentication failed - check your Mashvisor API key")
+                return []
+            
+            # Store raw response for debugging
+            try:
+                raw_response = response.text
+                print(f"📄 Raw response (first 200 chars): {raw_response[:200]}...")
+            except Exception as e:
+                print(f"❌ Could not log raw response: {e}")
+            
+            response.raise_for_status()
+            
+            try:
+                data = response.json()
+                print(f"📄 Response keys: {list(data.keys())}")
+                
+                # More detailed response analysis
+                if data.get('status') == 'success':
+                    content = data.get('content', {})
+                    
+                    # Check if content is a list or dictionary
+                    if isinstance(content, list):
+                        comps = content
+                    elif isinstance(content, dict):
+                        # Try different possible keys for property listings
+                        properties_keys = ['properties', 'items', 'listings', 'results']
+                        for key in properties_keys:
+                            if key in content and isinstance(content[key], list):
+                                comps = content[key]
+                                print(f"✅ Found properties under content.{key}")
+                                break
+                        else:
+                            # If no property keys found, look for pagination data
+                            if 'total_results' in content:
+                                print(f"📊 Total results reported by API: {content['total_results']}")
+                            comps = []
+                    else:
+                        comps = []
+                    
+                    # Try a direct 'properties' key at root level
+                    if not comps and 'properties' in data and isinstance(data['properties'], list):
+                        comps = data['properties']
+                    
+                    print(f"✅ Found {len(comps)} rental comps from Mashvisor")
+                    
+                    # If no comps found, provide troubleshooting advice
+                    if not comps:
+                        print("⚠️ No rental comps found. Try:")
+                        print("  1. Broader price range")
+                        print("  2. Different city/state combination")
+                        print("  3. Removing bed/bath filters")
+                        
+                    return comps
+                else:
+                    print(f"❌ Mashvisor search failed: {data.get('message', 'Unknown error')}")
+                    if 'message' in data:
+                        print(f"🔍 API message: {data['message']}")
+                    return []
+            except ValueError as e:
+                print(f"❌ Failed to parse JSON response: {e}")
+                return []
+                
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Mashvisor API error: {e}")
+            return []
+            
+    def get_comps_for_property(self, property_data: Dict, price_range: float = 0.2, limit: int = 30) -> List[Dict]:
+        """
+        Get ONLY long-term rental comps for a specific property.
+        Uses direct comp search without falling back to property endpoint.
+        """
+        # Extract city, state, zip from property data
+        city = property_data.get('city', '')
+        state = property_data.get('state', '')
+        zipcode = property_data.get('zip', '')
+        
+        if not zipcode:
+            zipcode = property_data.get('zipcode', '')
+            
+        if not zipcode:
+            zipcode = property_data.get('zip_code', '')
+
+        # If we don't have state or zip, try to extract from address
+        address = property_data.get('address', '')
+        if address:
+            print(f"📍 Extracting location from address: {address}")
+            
+            # Try to extract ZIP code (5 digits at the end of address)
+            zip_match = re.search(r'(\d{5})(?!.*\d{5})', address)
+            if zip_match:
+                zipcode = zip_match.group(1)
+                print(f"📍 Extracted ZIP: {zipcode}")
+                
+            # Try to extract state (2 uppercase letters before ZIP)
+            state_match = re.search(r'([A-Z]{2})\s+\d{5}', address)
+            if state_match:
+                state = state_match.group(1)
+                print(f"📍 Extracted state: {state}")
+    
+            # Try alternative state pattern (2 uppercase letters after comma)
+            if not state:
+                alt_state_match = re.search(r',\s+([A-Z]{2})[\s,]', address)
+                if alt_state_match:
+                    state = alt_state_match.group(1)
+                    print(f"📍 Extracted state (alt method): {state}")
+
+        # Get property details
+        bedrooms = property_data.get('bedrooms', 2)
+        bathrooms = property_data.get('bathrooms', 1)
+        price = property_data.get('price', 200000)
+
+        # Use a wider price range to increase chances of finding comps
+        min_price = int(price * (1 - price_range))
+        max_price = int(price * (1 + price_range))
+        
+        # Use sensible bed/bath ranges
+        min_beds = max(1, bedrooms - 1)
+        max_beds = bedrooms + 1
+        min_baths = max(1, bathrooms - 1)
+        max_baths = bathrooms + 1
+
+        print(f"🔍 Getting ONLY comps for property: {bedrooms}bd/{bathrooms}ba, zip {zipcode}, price ${price}")
+        print(f"🔍 Location data: {city}, {state} {zipcode}")
+        
+        # Try to get comps using the original method
+        comps = self.search_long_term_rental_comps(
+            city=city,
+            state=state,
+            zipcode=zipcode,
+            min_price=min_price,
+            max_price=max_price,
+            min_beds=min_beds,
+            max_beds=max_beds,
+            min_baths=min_baths,
+            max_baths=max_baths,
+            limit=limit
+        )
+        
+        print(f"✅ Found {len(comps)} rental comps from search")
+        return comps
+    
+    def get_property_rental_data(self, property_data: Dict) -> Dict:
+        """
+        Get detailed property information including rental estimates using 
+        Mashvisor's property endpoint.
+        """
+        endpoint = f"{self.base_url}/client/property"
+        
+        # Start with address lookup approach instead of ID
+        params = {
+            'state': property_data.get('state', '')
+        }
+        
+        # Fix city parameter - use the corrected city from the property_data
+        if property_data.get('address'):
+            params['address'] = property_data.get('address')
+            
+            # City is required for address lookup - use the properly extracted city
+            if property_data.get('city'):
+                params['city'] = property_data.get('city')
+                print(f"🏙️ Using city parameter: {params['city']}")
+                
+        # Only fall back to ID if we don't have an address
+        elif property_data.get('zpid'):
+            params['id'] = property_data.get('zpid')
+            
+        try:
+            print(f"🔍 Fetching property data from Mashvisor for {params}")
+            
+            # Increase timeout to 60 seconds instead of 30
+            response = requests.get(
+                endpoint, 
+                headers=self.headers, 
+                params=params, 
+                timeout=60  # Increased timeout
+            )
+            
+            print(f"📡 Request URL: {response.url}")
+            print(f"📊 Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get('status') == 'success' and data.get('content'):
+                    content = data['content']
+                    print(f"✅ Property data retrieved successfully")
+                    
+                    # Extract rental information
+                    rental_info = {}
+                    
+                    # Get traditional (long-term) rental estimate
+                    if content.get('ROI') and content['ROI'].get('traditional_rental'):
+                        rental_info['traditional_rental'] = content['ROI']['traditional_rental']
+                        rental_info['traditional_ROI'] = content['ROI'].get('traditional_ROI')
+                        rental_info['traditional_cap_rate'] = content['ROI'].get('traditional_cap_rate')
+                
+                    # Get Airbnb (short-term) rental estimate
+                    if content.get('ROI') and content['ROI'].get('airbnb_rental'):
+                        rental_info['airbnb_rental'] = content['ROI']['airbnb_rental']
+                        rental_info['airbnb_ROI'] = content['ROI'].get('airbnb_ROI')
+                        rental_info['airbnb_cap_rate'] = content['ROI'].get('airbnb_cap_rate')
+                
+                    return rental_info
+                else:
+                    print(f"❌ Failed to get property data: {data.get('message', 'Unknown error')}")
+                    return None
+            else:
+                print(f"❌ API request failed: {response.status_code}")
+                return None
+            
+        except Exception as e:
+            print(f"❌ Error fetching property data: {str(e)}")
+            return None
+        
+    def get_traditional_rental_comps(self, city, state, zipcode=None, bedrooms=None, bathrooms=None):
+        """Get traditional rental listings using Mashvisor's neighborhood listing endpoint"""
+        try:
+            # First we need to find the neighborhood_id
+            neighborhood_id = self._get_neighborhood_id(city, state, zipcode)
+            
+            if not neighborhood_id:
+                print(f"❌ Could not find neighborhood ID for {city}, {state}, {zipcode}")
+                return []
+            
+            # Now use the neighborhood_id to get rental listings
+            endpoint = f"{self.base_url}/client/neighborhood/{neighborhood_id}/traditional/listing"
+            
+            params = {
+                "format": "json",
+                "items": 20,
+                "order": "desc",
+                "page": 1,
+                "state": state
+                # No beds/baths parameters
+            }
+            
+            # Remove None values from params
+            params = {k: v for k, v in params.items() if v is not None}
+            
+            print(f"🔍 Fetching traditional rental comps from neighborhood ID: {neighborhood_id}")
+            response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("status") == "success" and data.get("content"):
+                    listings = data["content"].get("results", [])
+                    print(f"✅ Found {len(listings)} traditional rental comps")
+                    
+                    # Format the comps for consistent response
+                    formatted_comps = []
+                    for listing in listings:
+                        formatted_comps.append({
+                            "address": listing.get("address", ""),
+                            "city": listing.get("city", ""),
+                            "state": listing.get("state", ""),
+                            "zipcode": listing.get("zipcode", ""),
+                            "price": listing.get("price", 0),  # Rental price
+                            "bedrooms": listing.get("beds", 0),
+                            "bathrooms": listing.get("baths", 0),
+                            "sqft": listing.get("sqft", 0),
+                            "year_built": listing.get("year_built"),
+                            "type": listing.get("type", ""),
+                            "days_on_market": listing.get("days_on_market")
+                        })
+                    
+                    return formatted_comps
+                
+            print(f"❌ Error fetching traditional rental comps: {response.status_code}")
+            print(f"Response: {response.text[:200]}...")
+            return []
+            
+        except Exception as e:
+            print(f"❌ Exception fetching traditional rental comps: {str(e)}")
+            return []
+        
+    def _get_neighborhood_id(self, city, state, zipcode=None):
+        """Get neighborhood ID from Mashvisor API"""
+        try:
+            # Try the neighborhood search endpoint
+            endpoint = f"{self.base_url}/client/neighborhood"
+            
+            params = {
+                "state": state,
+                "city": city
+            }
+            
+            if zipcode:
+                params["zip"] = zipcode
+                
+            response = requests.get(endpoint, headers=self.headers, params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("status") == "success" and data.get("content"):
+                    neighborhoods = data["content"]
+                    
+                    if isinstance(neighborhoods, list) and len(neighborhoods) > 0:
+                        # Return the first neighborhood id
+                        return neighborhoods[0].get("id")
+                        
+            # If we can't find the neighborhood through search, try alternative methods
+            # This could be expanded based on your needs                
+            return None
+            
+        except Exception as e:
+            print(f"❌ Exception getting neighborhood ID: {str(e)}")
+            return None
+        
+    def get_city_neighborhoods(self, state, city):
+        """
+        Get all neighborhood IDs for a city using the city/neighborhoods endpoint
+        """
+        try:
+            # URL encode the city name (spaces become %20)
+            encoded_city = city.replace(' ', '%20')
+            endpoint = f"{self.base_url}/client/city/neighborhoods/{state}/{encoded_city}"
+            
+            print(f"🔍 Fetching neighborhoods for {city}, {state}")
+            response = requests.get(endpoint, headers=self.headers, timeout=30)
+            
+            print(f"📡 Request URL: {response.url}")
+            print(f"📊 Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("status") == "success" and data.get("content") and data["content"].get("results"):
+                    neighborhoods = data["content"]["results"]
+                    print(f"✅ Found {len(neighborhoods)} neighborhoods in {city}, {state}")
+                    
+                    # Extract neighborhood IDs and names
+                    neighborhood_data = []
+                    for hood in neighborhoods:
+                        neighborhood_data.append({
+                            "id": hood.get("id"),
+                            "name": hood.get("name"),
+                            "latitude": hood.get("latitude"),
+                            "longitude": hood.get("longitude")
+                        })
+                    
+                    return neighborhood_data
+                else:
+                    print(f"⚠️ No neighborhoods found or unexpected response format")
+                    return []
+            else:
+                print(f"❌ Error fetching neighborhoods: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Exception fetching city neighborhoods: {str(e)}")
+            return []
+    
+    def _get_traditional_listings_by_neighborhood(self, neighborhood_id, state, bedrooms=None, bathrooms=None):
+        """Get traditional rental listings using a specific neighborhood ID"""
+        try:
+            endpoint = f"{self.base_url}/client/neighborhood/{neighborhood_id}/traditional/listing"
+            
+            # Simplified parameters - only what's required
+            params = {
+                "format": "json",
+                "state": state  # This is the only required parameter
+            }
+            
+            # Optionally add these back if the minimal request works
+            # params["items"] = 20
+            # params["order"] = "desc"
+            # params["page"] = 1
+            
+            # Add optional filters if provided and if the API starts working
+            # if bedrooms:
+            #     params["category"] = bedrooms  # Try category instead of beds
+            
+            print(f"🔍 Fetching traditional rental listings for neighborhood ID: {neighborhood_id}")
+            response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
+            
+            print(f"📡 Request URL: {response.url}")
+            print(f"📊 Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("status") == "success" and data.get("content") and data["content"].get("results"):
+                    listings = data["content"]["results"]
+                    print(f"✅ Found {len(listings)} traditional rental listings")
+                    
+                    # Format the rental comps
+                    formatted_comps = []
+                    for listing in listings:
+                        comp = {
+                            "address": listing.get("address", ""),
+                            "city": listing.get("city", ""),
+                            "state": listing.get("state", ""),
+                            "zipcode": listing.get("zipcode", ""),
+                            "price": listing.get("price", 0),
+                            "bedrooms": listing.get("beds", 0),
+                            "bathrooms": listing.get("baths", 0),
+                            "sqft": listing.get("sqft", 0),
+                            "year_built": listing.get("year_built"),
+                            "property_type": listing.get("type", ""),
+                            "distance": listing.get("distance", 0)
+                        }
+                        formatted_comps.append(comp)
+                    
+                    return formatted_comps
+                else:
+                    print(f"⚠️ No rental listings found in response")
+                    return []
+            else:
+                print(f"⚠️ API returned status code: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Exception fetching rental listings: {str(e)}")
+            return []
+    
+    def get_property_comps(self, city, state, zipcode, bedrooms=None, bathrooms=None, latitude=None, longitude=None):
+        """Get rental comps for a property prioritizing by location"""
+        try:
+            print(f"🔍 Getting location-specific comps for {city}, {state}, zip: {zipcode}")
+            # Debug coordinates
+            print(f"📍 Property coordinates: lat={latitude}, lng={longitude}")
+            
+            # Get all neighborhoods for this city
+            neighborhoods = self.get_city_neighborhoods(state, city)
+            
+            if not neighborhoods or len(neighborhoods) == 0:
+                print(f"❌ No neighborhoods found for {city}, {state}")
+                return []
+                    
+            print(f"✅ Found {len(neighborhoods)} neighborhoods in {city}, {state}")
+            
+            # First filter - try to find neighborhoods that match the zipcode
+            zipcode_hoods = []
+            other_hoods = []
+            
+            # Primary zipcode matching if available
+            for hood in neighborhoods:
+                # Try to extract zip from neighborhood name
+                hood_name = hood.get("name", "").lower()
+                if zipcode and (zipcode in hood_name or zipcode[:3] in hood_name):
+                    zipcode_hoods.append(hood)
+                else:
+                    other_hoods.append(hood)
+            
+            print(f"📮 Found {len(zipcode_hoods)} neighborhoods potentially matching zipcode {zipcode}")
+            
+            # If we have coordinates, sort the remaining neighborhoods by distance
+            if latitude and longitude:
+                from math import radians, sin, cos, sqrt, atan2
+                
+                def haversine_distance(lat1, lon1, lat2, lon2):
+                    """Calculate distance between two points on Earth"""
+                    if not all([lat1, lon1, lat2, lon2]):
+                        return 9999
+                        
+                    try:
+                        # Convert to floats and radians
+                        lat1, lon1 = float(lat1), float(lon1)
+                        lat2, lon2 = float(lat2), float(lon2)
+                        
+                        lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+                        
+                        # Haversine formula
+                        dlon = lon2 - lon1
+                        dlat = lat2 - lat1
+                        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+                        c = 2 * atan2(sqrt(a), sqrt(1-a))
+                        return 6371 * c  # Distance in km
+                    except (ValueError, TypeError) as e:
+                        print(f"⚠️ Error calculating distance: {str(e)}")
+                        return 9999
+                
+                # Calculate distances for other neighborhoods
+                for hood in other_hoods:
+                    hood_lat = hood.get("latitude")
+                    hood_lng = hood.get("longitude")
+                    
+                    if hood_lat and hood_lng:
+                        hood["distance"] = haversine_distance(
+                            latitude, longitude, hood_lat, hood_lng
+                        )
+                    else:
+                        hood["distance"] = 9999
+                        
+                # Sort other neighborhoods by distance
+                other_hoods.sort(key=lambda x: x.get("distance", 9999))
+                
+                # Print the first few neighborhoods and their distances
+                for i, hood in enumerate(other_hoods[:3]):
+                    dist = hood.get("distance", "unknown")
+                    print(f"🗺️ Neighborhood: {hood.get('name')} - Distance: {dist:.2f}km")
+        
+        # Combine prioritized neighborhoods: zip matches first, then by distance
+        prioritized_neighborhoods = zipcode_hoods + other_hoods
+        
+        # Limit neighborhood checks to avoid API overload
+        max_neighborhoods_to_check = 5
+        all_comps = []
+        
+        for i, hood in enumerate(prioritized_neighborhoods):
+            if i >= max_neighborhoods_to_check:
+                break
+                
+            hood_id = hood.get("id")
+            hood_name = hood.get("name")
+            
+            if not hood_id:
+                continue
+                
+            print(f"🔍 Checking for rental comps in {hood_name} (ID: {hood_id})")
+            
+            # Get rental listings for this neighborhood
+            hood_comps = self._get_traditional_listings_by_neighborhood(
+                hood_id, state
+            )
+            
+            if hood_comps and len(hood_comps) > 0:
+                print(f"✅ Found {len(hood_comps)} comps in {hood_name}")
+                
+                # Tag these comps with their neighborhood name for better UI display
+                for comp in hood_comps:
+                    comp["neighborhood"] = hood_name
+                    
+                all_comps.extend(hood_comps)
+                
+                # If we have enough comps, stop searching
+                if len(all_comps) >= 10:
+                    break
+        
+        if all_comps:
+            print(f"✅ Returning {len(all_comps)} rental comps from neighborhoods")
+            return all_comps
+        else:
+            print("⚠️ No rental comps found in any neighborhood")
+            return []
+            
+    except Exception as e:
+        print(f"❌ Error getting property rental comps: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+# Create an instance that can be imported by other modules
+mashvisor_search = MashvisorPropertySearch()
+
+# Fix the create_listing_urls method - move it outside the class and make it importable
+def create_listing_urls(address: str, city: str, state: str, zip_code: str = None) -> Dict[str, str]:
+    """
+    Generate URLs for property listings based on the address, city, state, and optional zip code.
+    """
+    base_url = "https://www.zillow.com/homes/"
+    formatted_address = "-".join(address.split())
+    formatted_city = "-".join(city.split())
+    formatted_state = state
+    formatted_zip = f"-{zip_code}" if zip_code else ""
+    zillow_url = f"{base_url}{formatted_address}-{formatted_city}-{formatted_state}{formatted_zip}_rb/"
+    
+    return {"zillow": zillow_url}

@@ -1,0 +1,139 @@
+import React, { useState, useEffect } from 'react';
+import { checkApiStatus, searchProperties } from './services/api';
+import SearchForm from './components/SearchForm';
+import PropertyList from './components/PropertyList';
+import 'bootstrap/dist/css/bootstrap.min.css';
+import './index.css';
+
+function App() {
+  const [properties, setProperties] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [apiConnected, setApiConnected] = useState(false);
+  const [apiError, setApiError] = useState(null);
+
+  // Check API connection on component mount
+  useEffect(() => {
+    const checkConnection = async () => {
+      const status = await checkApiStatus();
+      setApiConnected(status.connected);
+      setApiError(status.error);
+      
+      if (status.connected) {
+        console.log('✅ API connected successfully');
+      } else {
+        console.error('❌ API connection failed:', status.error);
+      }
+    };
+
+    checkConnection();
+    
+    // Check connection every 30 seconds
+    const interval = setInterval(checkConnection, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Handle search using our API service
+  const handleSearch = async (searchParams) => {
+    setLoading(true);
+    try {
+      console.log('Searching with params:', searchParams);
+      
+      // Make sure state is uppercase (backend might require this)
+      const formattedParams = {
+        ...searchParams,
+        state: searchParams.state.toUpperCase(),
+        // Ensure numeric values are converted from strings to numbers
+        downPaymentPercent: Number(searchParams.downPaymentPercent),
+        interestRate: Number(searchParams.interestRate),
+        minPrice: Number(searchParams.minPrice || 100000),
+        maxPrice: Number(searchParams.maxPrice || 1000000)
+      };
+      
+      console.log('Sending formatted params:', formattedParams);
+      const result = await searchProperties(formattedParams);
+      console.log('Search result:', result);
+      
+      // Ensure we're handling both possible response formats
+      if (Array.isArray(result)) {
+        setProperties(result);
+        console.log(`Set ${result.length} properties in state`);
+      } else if (result && result.properties && Array.isArray(result.properties)) {
+        setProperties(result.properties);
+        console.log(`Set ${result.properties.length} properties in state`);
+      } else {
+        console.error('Unexpected data format:', result);
+        setProperties([]);
+      }
+    } catch (error) {
+      console.error('Search failed:', error);
+      // Enhanced error logging
+      if (error.response) {
+        console.error('Response error data:', error.response.data);
+        console.error('Response status:', error.response.status);
+        
+        // Show validation errors if available
+        if (error.response.data && error.response.data.detail) {
+          console.error('Validation errors:', error.response.data.detail);
+        }
+      }
+      setProperties([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="container py-4">
+      <header className="text-center mb-5">
+        <h1>DSCR Property Analyzer</h1>
+        <p className="lead">Find investment properties with the best debt service coverage ratio</p>
+      </header>
+
+      {/* API Status Indicator */}
+      <div className="api-status mb-4">
+        {apiConnected ? (
+          <div className="alert alert-success">✅ API Connected</div>
+        ) : (
+          <div className="alert alert-danger">
+            ❌ API Disconnected
+            {apiError && <div className="mt-2">Error: {apiError}</div>}
+          </div>
+        )}
+      </div>
+
+      {/* Debug info */}
+      {properties.length > 0 && (
+        <div className="alert alert-info">
+          Found {properties.length} properties in state
+        </div>
+      )}
+
+      {/* Search Form */}
+      <div className="row">
+        <div className="col-md-4">
+          <SearchForm 
+            onSearch={handleSearch} 
+            loading={loading} 
+            apiConnected={apiConnected} 
+          />
+        </div>
+        
+        <div className="col-md-8">
+          {properties.length > 0 ? (
+            <PropertyList properties={properties} />
+          ) : (
+            <div className="text-center mt-5 p-5 bg-light rounded">
+              {loading ? (
+                <p>Searching for properties...</p>
+              ) : (
+                <p>Use the search form to find investment properties</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;

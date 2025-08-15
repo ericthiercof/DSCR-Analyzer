@@ -1,0 +1,20 @@
+/* Custom styles */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.api-status {
+  padding: 8px 16px;
+  margin-bottom: 20px;
+}
+
+.property-list {
+  margin-top: 20px;
+}
+
+.card {
+  margin-bottom: 20px;
+}
+
