@@ -69,13 +69,255 @@ class MashvisorPropertySearch:
         
         return neighborhoods
 
-    # Methods specifically for rental comps functionality
-    def get_property_comps(self, city, state, zipcode, bedrooms=None, bathrooms=None, latitude=None, longitude=None):
-        """Get rental comps for a property prioritizing by location"""
+    # Enhanced methods for better rental comps functionality
+    def _calculate_similarity_score(self, comp, target_property):
+        """Calculate similarity score between comp and target property"""
+        score = 0.0
+        max_score = 100.0
+        
+        # Bedroom match (25% weight)
+        if comp.get('bedrooms') and target_property.get('bedrooms'):
+            if comp['bedrooms'] == target_property['bedrooms']:
+                score += 25.0
+            elif abs(comp['bedrooms'] - target_property['bedrooms']) == 1:
+                score += 15.0  # Close match
+            elif abs(comp['bedrooms'] - target_property['bedrooms']) == 2:
+                score += 5.0   # Somewhat close
+        
+        # Bathroom match (20% weight)
+        if comp.get('bathrooms') and target_property.get('bathrooms'):
+            if comp['bathrooms'] == target_property['bathrooms']:
+                score += 20.0
+            elif abs(comp['bathrooms'] - target_property['bathrooms']) <= 0.5:
+                score += 15.0  # Close match
+            elif abs(comp['bathrooms'] - target_property['bathrooms']) <= 1.0:
+                score += 8.0   # Somewhat close
+        
+        # Price proximity (20% weight)
+        if comp.get('price') and target_property.get('price'):
+            comp_price = float(comp['price'])
+            target_price = float(target_property['price'])
+            if comp_price > 0 and target_price > 0:
+                price_diff_pct = abs(comp_price - target_price) / target_price
+                if price_diff_pct <= 0.1:  # Within 10%
+                    score += 20.0
+                elif price_diff_pct <= 0.2:  # Within 20%
+                    score += 15.0
+                elif price_diff_pct <= 0.3:  # Within 30%
+                    score += 10.0
+                elif price_diff_pct <= 0.5:  # Within 50%
+                    score += 5.0
+        
+        # Square footage similarity (15% weight)
+        if comp.get('sqft') and target_property.get('sqft'):
+            comp_sqft = float(comp['sqft'])
+            target_sqft = float(target_property['sqft'])
+            if comp_sqft > 0 and target_sqft > 0:
+                sqft_diff_pct = abs(comp_sqft - target_sqft) / target_sqft
+                if sqft_diff_pct <= 0.1:  # Within 10%
+                    score += 15.0
+                elif sqft_diff_pct <= 0.2:  # Within 20%
+                    score += 12.0
+                elif sqft_diff_pct <= 0.3:  # Within 30%
+                    score += 8.0
+                elif sqft_diff_pct <= 0.5:  # Within 50%
+                    score += 4.0
+        
+        # Distance bonus (20% weight) - closer is better
+        if comp.get('neighborhood_distance_miles') is not None:
+            distance = float(comp['neighborhood_distance_miles'])
+            if distance <= 1.0:  # Within 1 mile
+                score += 20.0
+            elif distance <= 2.0:  # Within 2 miles
+                score += 15.0
+            elif distance <= 5.0:  # Within 5 miles
+                score += 10.0
+            elif distance <= 10.0:  # Within 10 miles
+                score += 5.0
+        else:
+            # Default moderate score if no distance available
+            score += 10.0
+        
+        return min(score, max_score)  # Cap at 100%
+
+    def get_long_term_comps_direct(self, city, state, target_property):
+        """Get long-term rental comps using the dedicated API endpoint"""
         try:
-            print(f"🔍 Getting location-specific comps for {city}, {state}, zip: {zipcode}")
+            endpoint = f"{self.base_url}/client/long-term-comps"
+            
+            params = {
+                "state": state,
+                "city": city,
+                "format": "json"
+            }
+            
+            # Add price filters if target property price is available
+            if target_property.get('price'):
+                target_price = float(target_property['price'])
+                # Set price range: 70% to 130% of target property price
+                params["min_price"] = int(target_price * 0.7)
+                params["max_price"] = int(target_price * 1.3)
+            
+            print(f"🔍 Fetching long-term comps using dedicated endpoint for {city}, {state}")
+            print(f"📊 Price filter: {params.get('min_price', 'none')} - {params.get('max_price', 'none')}")
+            
+            response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
+            
+            print(f"📡 Request URL: {endpoint}")
+            print(f"📊 Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("status") == "success" and data.get("content"):
+                    content = data.get("content", {})
+                    
+                    # Parse the response structure
+                    comps = []
+                    if isinstance(content, dict):
+                        # Try different possible keys where comps might be stored
+                        for key in ["results", "properties", "listings", "comps", "data"]:
+                            if key in content:
+                                comps = content[key]
+                                print(f"✅ Found comps under '{key}' key: {len(comps)}")
+                                break
+                    elif isinstance(content, list):
+                        comps = content
+                    
+                    # Format and filter the comps
+                    formatted_comps = []
+                    for comp in comps:
+                        formatted_comp = {
+                            "address": comp.get("address", ""),
+                            "city": comp.get("city", ""),
+                            "state": comp.get("state", ""),
+                            "zipcode": comp.get("zipcode", ""),
+                            "price": comp.get("price", 0),
+                            "rent": comp.get("rent", comp.get("price", 0)),
+                            "bedrooms": comp.get("bedrooms", comp.get("beds", 0)),
+                            "bathrooms": comp.get("bathrooms", comp.get("baths", 0)),
+                            "sqft": comp.get("sqft", 0),
+                            "year_built": comp.get("year_built"),
+                            "property_type": comp.get("type", comp.get("property_type", "")),
+                            "source": "Mashvisor Long-term Comps API"
+                        }
+                        
+                        # Apply bedroom/bathroom filters
+                        if target_property.get('bedrooms') and formatted_comp.get('bedrooms'):
+                            # Allow some flexibility: target ±1 bedroom
+                            if abs(formatted_comp['bedrooms'] - target_property['bedrooms']) > 1:
+                                continue
+                                
+                        if target_property.get('bathrooms') and formatted_comp.get('bathrooms'):
+                            # Allow some flexibility: target ±1 bathroom  
+                            if abs(formatted_comp['bathrooms'] - target_property['bathrooms']) > 1:
+                                continue
+                        
+                        # Calculate similarity score
+                        formatted_comp['similarity_score'] = self._calculate_similarity_score(formatted_comp, target_property)
+                        formatted_comps.append(formatted_comp)
+                    
+                    # Sort by similarity score (highest first)
+                    formatted_comps.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+                    
+                    print(f"✅ Returning {len(formatted_comps)} filtered and scored long-term comps")
+                    return formatted_comps[:15]  # Return top 15 most similar
+                    
+                else:
+                    print(f"⚠️ No comps found in long-term comps API response")
+                    return []
+            else:
+                print(f"⚠️ Long-term comps API returned status code: {response.status_code}")
+                if response.status_code == 401:
+                    print("🔑 API key authentication required for long-term comps endpoint")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Exception fetching long-term comps: {str(e)}")
+            return []
+
+    # Methods specifically for rental comps functionality
+    def get_property_comps(self, city, state, zipcode, bedrooms=None, bathrooms=None, latitude=None, longitude=None, price=None):
+        """Get rental comps for a property with enhanced filtering and similarity scoring"""
+        try:
+            print(f"🔍 Getting enhanced comps for {city}, {state}, zip: {zipcode}")
             if latitude and longitude:
                 print(f"📍 Property coordinates: ({latitude}, {longitude})")
+            if price:
+                print(f"💰 Target property price: ${price:,}")
+            
+            # Create target property object for scoring
+            target_property = {
+                "city": city,
+                "state": state,
+                "zipcode": zipcode,
+                "bedrooms": bedrooms,
+                "bathrooms": bathrooms,
+                "latitude": latitude,
+                "longitude": longitude,
+                "price": price
+            }
+            
+            all_comps = []
+            
+            # Method 1: Try the dedicated long-term comps API first
+            print("🎯 Trying dedicated long-term comps API...")
+            long_term_comps = self.get_long_term_comps_direct(city, state, target_property)
+            if long_term_comps and len(long_term_comps) > 0:
+                all_comps.extend(long_term_comps)
+                print(f"✅ Added {len(long_term_comps)} comps from long-term comps API")
+            
+            # Method 2: Supplement with neighborhood-based search if we need more comps
+            if len(all_comps) < 10:
+                print("🏘️ Supplementing with neighborhood-based search...")
+                neighborhood_comps = self._get_neighborhood_based_comps(target_property)
+                if neighborhood_comps:
+                    all_comps.extend(neighborhood_comps)
+                    print(f"✅ Added {len(neighborhood_comps)} comps from neighborhood search")
+            
+            if all_comps:
+                # Remove duplicates based on address
+                seen_addresses = set()
+                unique_comps = []
+                for comp in all_comps:
+                    address_key = comp.get('address', '').lower().strip()
+                    if address_key and address_key not in seen_addresses:
+                        seen_addresses.add(address_key)
+                        unique_comps.append(comp)
+                
+                # Sort by similarity score (highest first)
+                unique_comps.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+                
+                # Limit to top 15 results
+                final_comps = unique_comps[:15]
+                
+                print(f"✅ Returning {len(final_comps)} unique, scored rental comps")
+                for i, comp in enumerate(final_comps[:5]):  # Log top 5 for debugging
+                    score = comp.get('similarity_score', 0)
+                    bed_bath = f"{comp.get('bedrooms', '?')}bd/{comp.get('bathrooms', '?')}ba"
+                    price = comp.get('price', 0)
+                    print(f"  {i+1}. Score: {score:.1f} | {bed_bath} | ${price:,} | {comp.get('address', 'No address')[:50]}")
+                
+                return final_comps
+            else:
+                print("⚠️ No rental comps found with any method")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Error getting enhanced property comps: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def _get_neighborhood_based_comps(self, target_property):
+        """Get comps using the original neighborhood-based approach with enhancements"""
+        try:
+            city = target_property.get('city')
+            state = target_property.get('state')
+            zipcode = target_property.get('zipcode')
+            latitude = target_property.get('latitude')
+            longitude = target_property.get('longitude')
+            bedrooms = target_property.get('bedrooms')
             
             # Get all neighborhoods for this city
             neighborhoods = self.get_city_neighborhoods(state, city)
@@ -92,7 +334,7 @@ class MashvisorPropertySearch:
             )
             
             # Limit neighborhood checks to avoid API overload, but prioritize closest ones
-            max_neighborhoods_to_check = 4
+            max_neighborhoods_to_check = 5  # Increased from 4
             all_comps = []
             
             for i, hood in enumerate(sorted_neighborhoods):
@@ -107,37 +349,25 @@ class MashvisorPropertySearch:
                     continue
                 
                 distance_info = f" ({distance:.2f} miles away)" if distance is not None else ""
-                print(f"🔍 Checking for rental comps in {hood_name} (ID: {hood_id}){distance_info}")
+                print(f"🔍 Checking neighborhood {i+1}/{max_neighborhoods_to_check}: {hood_name} (ID: {hood_id}){distance_info}")
                 
-                # Get rental listings for this neighborhood
-                hood_comps = self._get_traditional_listings_by_neighborhood(hood_id, state, bedrooms)
+                # Get rental listings for this neighborhood with enhanced filtering
+                hood_comps = self._get_traditional_listings_by_neighborhood_enhanced(
+                    hood_id, state, target_property, distance
+                )
                 
                 if hood_comps and len(hood_comps) > 0:
-                    print(f"✅ Found {len(hood_comps)} comps in {hood_name}")
-                    
-                    # Tag these comps with their neighborhood name and distance
-                    for comp in hood_comps:
-                        comp["neighborhood"] = hood_name
-                        if distance is not None:
-                            comp["neighborhood_distance_miles"] = round(distance, 2)
-                        
+                    print(f"✅ Found {len(hood_comps)} filtered comps in {hood_name}")
                     all_comps.extend(hood_comps)
                     
                     # If we have enough comps, stop searching
-                    if len(all_comps) >= 10:
+                    if len(all_comps) >= 15:
                         break
             
-            if all_comps:
-                print(f"✅ Returning {len(all_comps)} rental comps from {len(set(comp.get('neighborhood') for comp in all_comps))} neighborhoods")
-                return all_comps
-            else:
-                print("⚠️ No rental comps found in any neighborhood")
-                return []
+            return all_comps
                 
         except Exception as e:
-            print(f"❌ Error getting property rental comps: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Error in neighborhood-based comps: {str(e)}")
             return []
     
     def get_city_neighborhoods(self, state, city):
@@ -182,6 +412,124 @@ class MashvisorPropertySearch:
             print(f"❌ Exception fetching city neighborhoods: {str(e)}")
             return []
     
+    def _get_traditional_listings_by_neighborhood_enhanced(self, neighborhood_id, state, target_property, neighborhood_distance=None):
+        """Get traditional rental listings for a specific neighborhood with enhanced filtering"""
+        try:
+            endpoint = f"{self.base_url}/client/neighborhood/{neighborhood_id}/traditional/listing"
+            
+            # Create parameters with required fields
+            params = {
+                "format": "json",
+                "state": state
+            }
+            
+            # Add filtering parameters if available
+            bedrooms = target_property.get('bedrooms')
+            if bedrooms:
+                # Try using category parameter for bedroom filtering
+                params["category"] = bedrooms
+            
+            print(f"🔍 Fetching enhanced traditional rental listings for neighborhood ID: {neighborhood_id}")
+            response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
+            
+            print(f"📡 Request URL: {endpoint}")
+            print(f"📊 Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("status") == "success" and data.get("content"):
+                    content = data.get("content", {})
+                    
+                    # Parse listings from response
+                    listings = []
+                    if isinstance(content, dict):
+                        # Try multiple possible keys where listings might be stored
+                        for key in ["results", "properties", "listings", "items", "data"]:
+                            if key in content:
+                                listings = content[key]
+                                print(f"✅ Found listings under '{key}' key: {len(listings)}")
+                                break
+                    elif isinstance(content, list):
+                        listings = content
+                    
+                    print(f"📊 Processing {len(listings)} raw listings from API")
+                    
+                    # Format and filter the rental comps
+                    formatted_comps = []
+                    for listing in listings:
+                        comp = {
+                            "address": listing.get("address", ""),
+                            "city": listing.get("city", ""),
+                            "state": listing.get("state", ""),
+                            "zipcode": listing.get("zipcode", ""),
+                            "price": listing.get("price", 0),
+                            "rent": listing.get("price", 0),
+                            "bedrooms": listing.get("beds", listing.get("bedrooms", 0)),
+                            "bathrooms": listing.get("baths", listing.get("bathrooms", 0)),
+                            "sqft": listing.get("sqft", 0),
+                            "year_built": listing.get("year_built"),
+                            "property_type": listing.get("type", ""),
+                            "neighborhood": listing.get("neighborhood", ""),
+                            "source": "Mashvisor Neighborhood API"
+                        }
+                        
+                        # Add neighborhood distance if available
+                        if neighborhood_distance is not None:
+                            comp["neighborhood_distance_miles"] = round(neighborhood_distance, 2)
+                        
+                        # Apply enhanced filtering
+                        if self._should_include_comp(comp, target_property):
+                            # Calculate similarity score
+                            comp['similarity_score'] = self._calculate_similarity_score(comp, target_property)
+                            formatted_comps.append(comp)
+                    
+                    # Sort by similarity score (highest first)
+                    formatted_comps.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+                    
+                    print(f"✅ Returning {len(formatted_comps)} filtered and scored comps from neighborhood")
+                    return formatted_comps[:10]  # Return top 10 from this neighborhood
+                else:
+                    print(f"⚠️ No rental listings found in response")
+                    return []
+            else:
+                print(f"⚠️ API returned status code: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Exception fetching enhanced rental listings: {str(e)}")
+            return []
+    
+    def _should_include_comp(self, comp, target_property):
+        """Determine if a comp should be included based on filtering criteria"""
+        # Basic validity checks
+        if not comp.get('address') or comp.get('price', 0) <= 0:
+            return False
+        
+        # Bedroom filtering (allow ±1 bedroom flexibility)
+        target_bedrooms = target_property.get('bedrooms')
+        comp_bedrooms = comp.get('bedrooms')
+        if target_bedrooms and comp_bedrooms:
+            if abs(comp_bedrooms - target_bedrooms) > 1:
+                return False
+        
+        # Bathroom filtering (allow ±1 bathroom flexibility)
+        target_bathrooms = target_property.get('bathrooms')
+        comp_bathrooms = comp.get('bathrooms')
+        if target_bathrooms and comp_bathrooms:
+            if abs(comp_bathrooms - target_bathrooms) > 1:
+                return False
+        
+        # Price filtering (keep comps within 50% to 200% of target price)
+        target_price = target_property.get('price')
+        comp_price = comp.get('price')
+        if target_price and comp_price and target_price > 0 and comp_price > 0:
+            price_ratio = comp_price / target_price
+            if price_ratio < 0.5 or price_ratio > 2.0:
+                return False
+        
+        return True
+
     def _get_traditional_listings_by_neighborhood(self, neighborhood_id, state, bedrooms=None):
         """Get traditional rental listings for a specific neighborhood"""
         try:
