@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useMortgage } from '../context/MortgageContext';
 
 const SearchForm = ({ onSearch, loading, apiConnected }) => {
-  const { settings, updateSettings } = useMortgage();
+  const { updateSettings } = useMortgage();
   
   const [searchParams, setSearchParams] = useState({
     city: '',
