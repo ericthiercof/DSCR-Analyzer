@@ -38,3 +38,15 @@
 - Property analysis with machine learning predictions
 - User authentication and saved property lists
 - Neighborhood data caching and analysis
+
+## 3. Update the Script to Include To-Do List
+
+```bash
+# Update the context script to include the to-do list
+sed -i '/echo "✅ Copilot context updated successfully!"/i \
+# 5. Copy the to-do list for easy reference\
+if [ -f .github/copilot/tasks/todo.md ]; then\
+  cp .github/copilot/tasks/todo.md .github/copilot/\
+fi\
+' update-copilot-context.sh
+```
