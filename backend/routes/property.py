@@ -101,7 +101,7 @@ async def search_properties(request: SearchRequest):
 
 @router.post("/property-comps")
 async def get_property_comps(property_data: dict):
-    """Get rental comps for a property with location-based prioritization"""
+    """Get rental comps for a property with enhanced filtering and similarity scoring"""
     try:
         address = property_data.get("address", "")
         city = property_data.get("city", "")
@@ -109,14 +109,16 @@ async def get_property_comps(property_data: dict):
         zipcode = property_data.get("zip", "")
         bedrooms = property_data.get("bedrooms")
         bathrooms = property_data.get("bathrooms")
+        price = property_data.get("price")  # Add price for enhanced filtering
         
         # Get coordinates for location-based prioritization
         latitude = property_data.get("latitude")
         longitude = property_data.get("longitude")
         
-        print(f"🔍 Looking for rental comps in {city}, {state}, {zipcode}")
+        print(f"🔍 Looking for enhanced rental comps in {city}, {state}, {zipcode}")
+        print(f"🏠 Target property: {bedrooms}bd/{bathrooms}ba, ${price:,}" if price else f"🏠 Target property: {bedrooms}bd/{bathrooms}ba")
         
-        # Use the new location-aware comps method
+        # Use the enhanced comps method
         comps = mashvisor_search.get_property_comps(
             city=city,
             state=state,
@@ -124,14 +126,16 @@ async def get_property_comps(property_data: dict):
             bedrooms=bedrooms,
             bathrooms=bathrooms,
             latitude=latitude,
-            longitude=longitude
+            longitude=longitude,
+            price=price  # Pass price for enhanced filtering
         )
         
         if comps and len(comps) > 0:
+            print(f"✅ Returning {len(comps)} enhanced rental comps")
             return comps
         else:
             # Fall back to the original method if needed
-            print("⚠️ No location-specific comps found, falling back to general search")
+            print("⚠️ No enhanced comps found, falling back to general search")
             neighborhoods = mashvisor_search.get_city_neighborhoods(state, city)
             if neighborhoods:
                 # Use existing neighborhood search as fallback

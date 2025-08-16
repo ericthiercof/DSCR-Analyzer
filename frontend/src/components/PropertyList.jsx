@@ -363,24 +363,69 @@ const PropertyList = ({ properties }) => {
                     </button>
                   </div>
 
-                  {/* Comps Display Section */}
+                  {/* Enhanced Comps Display Section */}
                   {comps[property.zpid] !== undefined && (
                     <div className="mt-3 border-top pt-3">
                       <h6>Comparable Rentals {comps[property.zpid].length > 0 && `(${comps[property.zpid].length})`}</h6>
                       {comps[property.zpid].length > 0 ? (
-                        <ul className="list-group list-group-flush">
+                        <div className="row">
                           {comps[property.zpid].map((comp, idx) => (
-                            <li key={idx} className="list-group-item p-2 d-flex justify-content-between">
-                              <small>
-                                {comp.address || 'Address unavailable'} 
-                                {comp.bedrooms && comp.bathrooms && ` - ${comp.bedrooms}bd/${comp.bathrooms}ba`}
-                              </small>
-                              <span className="badge bg-success">
-                                ${comp.price?.toLocaleString() || 0}/mo
-                              </span>
-                            </li>
+                            <div key={idx} className="col-12 mb-2">
+                              <div className="card border-left-primary">
+                                <div className="card-body p-2">
+                                  <div className="d-flex justify-content-between align-items-start">
+                                    <div className="flex-grow-1">
+                                      <div className="d-flex align-items-center mb-1">
+                                        <small className="fw-bold text-dark">
+                                          {comp.address || 'Address unavailable'}
+                                        </small>
+                                        {comp.similarity_score && (
+                                          <span className={`badge ms-2 ${
+                                            comp.similarity_score >= 90 ? 'bg-success' :
+                                            comp.similarity_score >= 70 ? 'bg-warning' : 'bg-secondary'
+                                          }`}>
+                                            {comp.similarity_score.toFixed(0)}% match
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="d-flex align-items-center text-muted small">
+                                        {comp.bedrooms && comp.bathrooms && (
+                                          <span className="me-3">
+                                            <i className="bi bi-house-door me-1"></i>
+                                            {comp.bedrooms}bd/{comp.bathrooms}ba
+                                          </span>
+                                        )}
+                                        {comp.sqft && (
+                                          <span className="me-3">
+                                            <i className="bi bi-rulers me-1"></i>
+                                            {comp.sqft} sqft
+                                          </span>
+                                        )}
+                                        {comp.neighborhood_distance_miles && (
+                                          <span className="me-3">
+                                            <i className="bi bi-geo-alt me-1"></i>
+                                            {comp.neighborhood_distance_miles} mi
+                                          </span>
+                                        )}
+                                        {comp.source && (
+                                          <span className="text-muted">
+                                            <i className="bi bi-info-circle me-1"></i>
+                                            {comp.source.replace('Mashvisor ', '')}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-end">
+                                      <span className="badge bg-success fs-6">
+                                        ${comp.price?.toLocaleString() || comp.rent?.toLocaleString() || 0}/mo
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                           ))}
-                        </ul>
+                        </div>
                       ) : (
                         <div className="alert alert-warning">
                           <h6 className="mb-2">No rental comps found</h6>
