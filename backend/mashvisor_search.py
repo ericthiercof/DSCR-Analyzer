@@ -2,6 +2,7 @@ import re
 import requests
 import os
 from typing import List, Dict
+import math
 
 class MashvisorPropertySearch:
     def __init__(self):
@@ -17,11 +18,64 @@ class MashvisorPropertySearch:
             "Content-Type": "application/json"
         }
     
+    # Helper methods for location-based neighborhood selection
+    def _calculate_distance(self, lat1, lon1, lat2, lon2):
+        """Calculate distance between two coordinates using Haversine formula (in miles)"""
+        if not all([lat1, lon1, lat2, lon2]):
+            return float('inf')
+        
+        # Convert to radians
+        lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+        
+        # Haversine formula
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+        c = 2 * math.asin(math.sqrt(a))
+        r = 3956  # Radius of earth in miles
+        return c * r
+
+    def _find_closest_neighborhoods(self, neighborhoods, zipcode=None, latitude=None, longitude=None):
+        """Find neighborhoods closest to the property location"""
+        if not neighborhoods:
+            return neighborhoods
+            
+        # If we have coordinates, sort by distance
+        if latitude is not None and longitude is not None:
+            print(f"🎯 Sorting neighborhoods by distance from coordinates ({latitude}, {longitude})")
+            
+            # Calculate distance to each neighborhood
+            for hood in neighborhoods:
+                hood_lat = hood.get('latitude')
+                hood_lon = hood.get('longitude')
+                distance = self._calculate_distance(latitude, longitude, hood_lat, hood_lon)
+                hood['distance_miles'] = distance
+            
+            # Sort by distance (closest first)
+            neighborhoods.sort(key=lambda x: x.get('distance_miles', float('inf')))
+            
+            # Log the sorted neighborhoods
+            for i, hood in enumerate(neighborhoods[:5]):  # Show top 5
+                print(f"  {i+1}. {hood.get('name')} - {hood.get('distance_miles', 'N/A'):.2f} miles")
+            
+            return neighborhoods
+        
+        # If we have zipcode but no coordinates, try to match by name/proximity
+        # This is a fallback - in a real implementation you'd want to geocode the zipcode
+        if zipcode:
+            print(f"🎯 Attempting to find neighborhood for zipcode {zipcode}")
+            # For now, just return neighborhoods as-is since we don't have zipcode->coordinate mapping
+            # In production, you'd want to use a geocoding service here
+        
+        return neighborhoods
+
     # Methods specifically for rental comps functionality
     def get_property_comps(self, city, state, zipcode, bedrooms=None, bathrooms=None, latitude=None, longitude=None):
         """Get rental comps for a property prioritizing by location"""
         try:
             print(f"🔍 Getting location-specific comps for {city}, {state}, zip: {zipcode}")
+            if latitude and longitude:
+                print(f"📍 Property coordinates: ({latitude}, {longitude})")
             
             # Get all neighborhoods for this city
             neighborhoods = self.get_city_neighborhoods(state, city)
@@ -32,21 +86,28 @@ class MashvisorPropertySearch:
                 
             print(f"✅ Found {len(neighborhoods)} neighborhoods in {city}, {state}")
             
-            # Limit neighborhood checks to avoid API overload
+            # Sort neighborhoods by proximity to the property location
+            sorted_neighborhoods = self._find_closest_neighborhoods(
+                neighborhoods.copy(), zipcode, latitude, longitude
+            )
+            
+            # Limit neighborhood checks to avoid API overload, but prioritize closest ones
             max_neighborhoods_to_check = 4
             all_comps = []
             
-            for i, hood in enumerate(neighborhoods):
+            for i, hood in enumerate(sorted_neighborhoods):
                 if i >= max_neighborhoods_to_check:
                     break
                     
                 hood_id = hood.get("id")
                 hood_name = hood.get("name")
+                distance = hood.get("distance_miles")
                 
                 if not hood_id:
                     continue
-                    
-                print(f"🔍 Checking for rental comps in {hood_name} (ID: {hood_id})")
+                
+                distance_info = f" ({distance:.2f} miles away)" if distance is not None else ""
+                print(f"🔍 Checking for rental comps in {hood_name} (ID: {hood_id}){distance_info}")
                 
                 # Get rental listings for this neighborhood
                 hood_comps = self._get_traditional_listings_by_neighborhood(hood_id, state, bedrooms)
@@ -54,9 +115,11 @@ class MashvisorPropertySearch:
                 if hood_comps and len(hood_comps) > 0:
                     print(f"✅ Found {len(hood_comps)} comps in {hood_name}")
                     
-                    # Tag these comps with their neighborhood name
+                    # Tag these comps with their neighborhood name and distance
                     for comp in hood_comps:
                         comp["neighborhood"] = hood_name
+                        if distance is not None:
+                            comp["neighborhood_distance_miles"] = round(distance, 2)
                         
                     all_comps.extend(hood_comps)
                     
@@ -65,7 +128,7 @@ class MashvisorPropertySearch:
                         break
             
             if all_comps:
-                print(f"✅ Returning {len(all_comps)} rental comps from neighborhoods")
+                print(f"✅ Returning {len(all_comps)} rental comps from {len(set(comp.get('neighborhood') for comp in all_comps))} neighborhoods")
                 return all_comps
             else:
                 print("⚠️ No rental comps found in any neighborhood")
