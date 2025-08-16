@@ -96,7 +96,12 @@ const PropertyList = ({ properties }) => {
         bedrooms: property.bedrooms,
         bathrooms: property.bathrooms,
         price: property.price,
-        state: property.state || property.address.split(',').pop().trim().substring(0,2)
+        state: property.state || property.address.split(',').pop().trim().substring(0,2),
+        // Add city extraction for better location targeting
+        city: property.city || (property.address.split(',')[1] ? property.address.split(',')[1].trim() : ''),
+        // Add coordinates for location-based neighborhood selection
+        latitude: property.latitude || property.lat,
+        longitude: property.longitude || property.lng
       });
       
       setComps(prev => ({
