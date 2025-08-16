@@ -181,11 +181,6 @@ const PropertyList = ({ properties }) => {
 
   // Generate Redfin URL from property address
   const getRedfinUrl = (property) => {
-    const formattedAddress = property.address
-      .replace(/\s+/g, '-')
-      .replace(/,/g, '')
-      .toLowerCase();
-      
     return `https://www.redfin.com/search/real-estate-listings?q=${encodeURIComponent(property.address)}`;
   };
 
