@@ -6,7 +6,6 @@
 - `/main.py` - Backend entry point
 - `/docs` - Project documentation
 - `/.github/copilot` - Copilot context information
-- `/docs` - Project documentation and agent interaction logs
 
 ## Key Frontend Components
 - `App.jsx` - Main application component
@@ -40,6 +39,14 @@
 - User authentication and saved property lists
 - Neighborhood data caching and analysis
 
-## Documentation
-- `project-map.md` - This project structure overview
-- `copilot-agent-log.md` - GitHub Copilot agent interaction history
+## 3. Update the Script to Include To-Do List
+
+```bash
+# Update the context script to include the to-do list
+sed -i '/echo "✅ Copilot context updated successfully!"/i \
+# 5. Copy the to-do list for easy reference\
+if [ -f .github/copilot/tasks/todo.md ]; then\
+  cp .github/copilot/tasks/todo.md .github/copilot/\
+fi\
+' update-copilot-context.sh
+```
