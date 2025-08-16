@@ -154,9 +154,9 @@ class MashvisorPropertySearch:
             # Add price filters if target property price is available
             if target_property.get('price'):
                 target_price = float(target_property['price'])
-                # Set price range: 70% to 130% of target property price
-                params["min_price"] = int(target_price * 0.7)
-                params["max_price"] = int(target_price * 1.3)
+                # Set price range: 50% to 150% of target property price (relaxed for more results)
+                params["min_price"] = int(target_price * 0.5)
+                params["max_price"] = int(target_price * 1.5)
             
             print(f"🔍 Fetching long-term comps using dedicated endpoint for {city}, {state}")
             print(f"📊 Price filter: {params.get('min_price', 'none')} - {params.get('max_price', 'none')}")
@@ -168,6 +168,15 @@ class MashvisorPropertySearch:
             
             if response.status_code == 200:
                 data = response.json()
+                
+                # Enhanced debugging for API response structure
+                print(f"📊 API Response structure: status='{data.get('status')}', has_content={bool(data.get('content'))}")
+                if data.get("content"):
+                    content = data.get("content", {})
+                    if isinstance(content, dict):
+                        print(f"📊 Content keys: {list(content.keys())}")
+                    else:
+                        print(f"📊 Content type: {type(content)}, length: {len(content) if hasattr(content, '__len__') else 'N/A'}")
                 
                 if data.get("status") == "success" and data.get("content"):
                     content = data.get("content", {})
@@ -181,8 +190,20 @@ class MashvisorPropertySearch:
                                 comps = content[key]
                                 print(f"✅ Found comps under '{key}' key: {len(comps)}")
                                 break
+                        
+                        # If no comps found in standard keys, show what's available
+                        if not comps and content:
+                            print(f"⚠️ No comps found in standard keys. Available keys: {list(content.keys())}")
+                            # Check if any values in content are lists that might contain comps
+                            for key, value in content.items():
+                                if isinstance(value, list):
+                                    print(f"📊 Key '{key}' contains list with {len(value)} items")
+                                    if value and len(value) > 0:
+                                        print(f"📊 Sample item from '{key}': {type(value[0])}")
+                                        
                     elif isinstance(content, list):
                         comps = content
+                        print(f"✅ Content is direct list with {len(comps)} items")
                     
                     # Format and filter the comps
                     formatted_comps = []
@@ -202,20 +223,11 @@ class MashvisorPropertySearch:
                             "source": "Mashvisor Long-term Comps API"
                         }
                         
-                        # Apply bedroom/bathroom filters
-                        if target_property.get('bedrooms') and formatted_comp.get('bedrooms'):
-                            # Allow some flexibility: target ±1 bedroom
-                            if abs(formatted_comp['bedrooms'] - target_property['bedrooms']) > 1:
-                                continue
-                                
-                        if target_property.get('bathrooms') and formatted_comp.get('bathrooms'):
-                            # Allow some flexibility: target ±1 bathroom  
-                            if abs(formatted_comp['bathrooms'] - target_property['bathrooms']) > 1:
-                                continue
-                        
-                        # Calculate similarity score
-                        formatted_comp['similarity_score'] = self._calculate_similarity_score(formatted_comp, target_property)
-                        formatted_comps.append(formatted_comp)
+                        # Use the standard filtering logic instead of early filtering
+                        if self._should_include_comp(formatted_comp, target_property):
+                            # Calculate similarity score
+                            formatted_comp['similarity_score'] = self._calculate_similarity_score(formatted_comp, target_property)
+                            formatted_comps.append(formatted_comp)
                     
                     # Sort by similarity score (highest first)
                     formatted_comps.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
@@ -268,7 +280,7 @@ class MashvisorPropertySearch:
                 print(f"✅ Added {len(long_term_comps)} comps from long-term comps API")
             
             # Method 2: Supplement with neighborhood-based search if we need more comps
-            if len(all_comps) < 10:
+            if len(all_comps) < 5:  # Reduced threshold to get more comps sooner
                 print("🏘️ Supplementing with neighborhood-based search...")
                 neighborhood_comps = self._get_neighborhood_based_comps(target_property)
                 if neighborhood_comps:
@@ -334,7 +346,7 @@ class MashvisorPropertySearch:
             )
             
             # Limit neighborhood checks to avoid API overload, but prioritize closest ones
-            max_neighborhoods_to_check = 5  # Increased from 4
+            max_neighborhoods_to_check = 8  # Increased from 5 to get more comps
             all_comps = []
             
             for i, hood in enumerate(sorted_neighborhoods):
@@ -438,6 +450,13 @@ class MashvisorPropertySearch:
             if response.status_code == 200:
                 data = response.json()
                 
+                # Enhanced debugging for neighborhood listings
+                print(f"📊 Neighborhood API Response: status='{data.get('status')}', has_content={bool(data.get('content'))}")
+                if data.get("content"):
+                    content = data.get("content", {})
+                    if isinstance(content, dict):
+                        print(f"📊 Content keys: {list(content.keys())}")
+                
                 if data.get("status") == "success" and data.get("content"):
                     content = data.get("content", {})
                     
@@ -450,8 +469,14 @@ class MashvisorPropertySearch:
                                 listings = content[key]
                                 print(f"✅ Found listings under '{key}' key: {len(listings)}")
                                 break
+                        
+                        # If no listings found in standard keys, show what's available
+                        if not listings and content:
+                            print(f"⚠️ No listings found in standard keys. Available keys: {list(content.keys())}")
+                            
                     elif isinstance(content, list):
                         listings = content
+                        print(f"✅ Content is direct list with {len(listings)} items")
                     
                     print(f"📊 Processing {len(listings)} raw listings from API")
                     
